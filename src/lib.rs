@@ -1,8 +1,11 @@
-use nih_plug::prelude::*;
-// use rand::Rng;
 use core::f32;
+use core::fmt;
+use nih_plug::prelude::*;
+use num_enum::FromPrimitive;
+use num_enum::IntoPrimitive;
 use rand_pcg::Pcg32;
 use std::sync::Arc;
+// use rand::Rng;
 
 /// The number of simultaneous voices for this synth.
 const NUM_VOICES: u32 = 16;
@@ -14,6 +17,7 @@ const MAX_BLOCK_SIZE: usize = 64;
 // `PolyModulation` and `MonoAutomation` events makes it possible to easily link these events to the
 // correct parameter.
 
+#[derive(Debug, PartialEq, IntoPrimitive, FromPrimitive)]
 #[repr(u32)]
 enum PolyModId {
     Gain = 0,
@@ -25,10 +29,9 @@ enum PolyModId {
     Osc1Detune = 4,
     Osc2Detune = 5,
     Osc3Detune = 6,
-}
 
-fn detune_multiplier(cents: f32) -> f32 {
-    2.0_f32.powf(cents / 1200.0)
+    #[num_enum(catch_all)]
+    Unknown(u32),
 }
 
 /// A simple polyphonic synthesizer with support for CLAP's polyphonic modulation. See
@@ -143,6 +146,21 @@ struct Voice {
     voice_gain: Option<(f32, Smoother<f32>)>,
 }
 
+impl fmt::Display for PolyModId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PolyModId::Gain => write!(f, "Gain"),
+            PolyModId::Osc1Gain => write!(f, "Osc1Gain"),
+            PolyModId::Osc2Gain => write!(f, "Osc2Gain"),
+            PolyModId::Osc3Gain => write!(f, "Osc3Gain"),
+            PolyModId::Osc1Detune => write!(f, "Osc1Detune"),
+            PolyModId::Osc2Detune => write!(f, "Osc2Detune"),
+            PolyModId::Osc3Detune => write!(f, "Osc3Detune"),
+            PolyModId::Unknown(n) => write!(f, "Unknown({})", n),
+        }
+    }
+}
+
 impl WaveType {
     fn sample(self, phase: f32) -> f32 {
         match self {
@@ -165,62 +183,6 @@ impl Default for TripleOsc {
             next_internal_voice_id: 0,
         }
     }
-}
-
-fn new_gain_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
-    FloatParam::new(
-        name,
-        util::db_to_gain(-12.0),
-        // Because we're representing gain as decibels the range is already logarithmic
-        FloatRange::Linear {
-            min: util::db_to_gain(-36.0),
-            max: util::db_to_gain(0.0),
-        },
-    )
-    // This enables polyphonic mdoulation for this parameter by representing all related
-    // events with this ID. After enabling this, the plugin **must** start sending
-    // `VoiceTerminated` events to the host whenever a voice has ended.
-    .with_poly_modulation_id(poly_mod_id as u32)
-    .with_smoother(SmoothingStyle::Logarithmic(5.0))
-    .with_unit(" dB")
-    .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-    .with_string_to_value(formatters::s2v_f32_gain_to_db())
-}
-
-fn new_detune_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
-    FloatParam::new(
-        name,
-        0.0,
-        // Because we're representing gain as decibels the range is already logarithmic
-        FloatRange::Linear {
-            min: -50.0,
-            max: 50.0,
-        },
-    )
-    // This enables polyphonic modulation for this parameter by representing all related
-    // events with this ID. After enabling this, the plugin **must** start sending
-    // `VoiceTerminated` events to the host whenever a voice has ended.
-    .with_poly_modulation_id(poly_mod_id as u32)
-    .with_smoother(SmoothingStyle::Logarithmic(5.0))
-    .with_step_size(1.0)
-    .with_unit(" cents")
-}
-
-fn new_envelope_param(name: &str, default: f32) -> FloatParam {
-    FloatParam::new(
-        name,
-        default,
-        FloatRange::Skewed {
-            min: 0.0,
-            max: 2000.0,
-            factor: FloatRange::skew_factor(-1.0),
-        },
-    )
-    // These parameters are global (and they cannot be changed once the voice has started).
-    // They also don't need any smoothing themselves because they affect smoothing
-    // coefficients.
-    .with_step_size(0.1)
-    .with_unit(" ms")
 }
 
 impl Default for TripleOscParams {
@@ -380,9 +342,8 @@ impl Plugin for TripleOsc {
                                 if let Some(voice_idx) = self.get_voice_idx(voice_id) {
                                     let voice = self.voices[voice_idx].as_mut().unwrap();
 
-                                    match poly_modulation_id {
-                                        // FIXME: Use PolyModId::Gain
-                                        0 => {
+                                    match PolyModId::from(poly_modulation_id) {
+                                        PolyModId::Gain => {
                                             // This should either create a smoother for this
                                             // modulated parameter or update the existing one.
                                             // Notice how this uses the parameter's unmodulated
@@ -413,10 +374,9 @@ impl Plugin for TripleOsc {
                                                     .set_target(sample_rate, target_plain_value);
                                             }
                                         }
-                                        n => nih_debug_assert_failure!(
-                                            "Polyphonic modulation sent for unknown poly \
-                                             modulation ID {}",
-                                            n
+                                        poly_mod_id => nih_debug_assert_failure!(
+                                            "Polyphonic modulation not implemented for {}",
+                                            poly_mod_id
                                         ),
                                     }
                                 }
@@ -431,9 +391,9 @@ impl Plugin for TripleOsc {
                                 // a modulated parameter, the modulated values/smoothing targets
                                 // need to be updated for all polyphonically modulated voices.
                                 for voice in self.voices.iter_mut().filter_map(|v| v.as_mut()) {
-                                    match poly_modulation_id {
+                                    match PolyModId::from(poly_modulation_id) {
                                         // FIXME: Use PolyModId::Gain
-                                        0 => {
+                                        PolyModId::Gain => {
                                             let (normalized_offset, smoother) =
                                                 match voice.voice_gain.as_mut() {
                                                     Some((o, s)) => (o, s),
@@ -451,7 +411,7 @@ impl Plugin for TripleOsc {
                                             smoother.set_target(sample_rate, target_plain_value);
                                         }
                                         n => nih_debug_assert_failure!(
-                                            "Automation event sent for unknown poly modulation ID \
+                                            "Automation event sent for not implemented poly modulation ID \
                                              {}",
                                             n
                                         ),
@@ -760,3 +720,64 @@ impl ClapPlugin for TripleOsc {
 }
 
 nih_export_clap!(TripleOsc);
+
+// FIXME: Extract below as utils
+fn detune_multiplier(cents: f32) -> f32 {
+    2.0_f32.powf(cents / 1200.0)
+}
+
+fn new_gain_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+    FloatParam::new(
+        name,
+        util::db_to_gain(-12.0),
+        // Because we're representing gain as decibels the range is already logarithmic
+        FloatRange::Linear {
+            min: util::db_to_gain(-36.0),
+            max: util::db_to_gain(0.0),
+        },
+    )
+    // This enables polyphonic mdoulation for this parameter by representing all related
+    // events with this ID. After enabling this, the plugin **must** start sending
+    // `VoiceTerminated` events to the host whenever a voice has ended.
+    .with_poly_modulation_id(poly_mod_id.into())
+    .with_smoother(SmoothingStyle::Logarithmic(5.0))
+    .with_unit(" dB")
+    .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+    .with_string_to_value(formatters::s2v_f32_gain_to_db())
+}
+
+fn new_detune_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        // Because we're representing gain as decibels the range is already logarithmic
+        FloatRange::Linear {
+            min: -50.0,
+            max: 50.0,
+        },
+    )
+    // This enables polyphonic modulation for this parameter by representing all related
+    // events with this ID. After enabling this, the plugin **must** start sending
+    // `VoiceTerminated` events to the host whenever a voice has ended.
+    .with_poly_modulation_id(poly_mod_id.into())
+    .with_smoother(SmoothingStyle::Logarithmic(5.0))
+    .with_step_size(1.0)
+    .with_unit(" cents")
+}
+
+fn new_envelope_param(name: &str, default: f32) -> FloatParam {
+    FloatParam::new(
+        name,
+        default,
+        FloatRange::Skewed {
+            min: 0.0,
+            max: 2000.0,
+            factor: FloatRange::skew_factor(-1.0),
+        },
+    )
+    // These parameters are global (and they cannot be changed once the voice has started).
+    // They also don't need any smoothing themselves because they affect smoothing
+    // coefficients.
+    .with_step_size(0.1)
+    .with_unit(" ms")
+}

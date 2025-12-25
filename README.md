@@ -20,6 +20,8 @@ A simple triple oscillator CLAP synthesizer.
 - Add Pan for each oscillator
 - Add some form of waveform modulation, e.g. pulse width
 - Add fine detuning for each channel and oscillator
+- Add note retrigger parameter
+- Add initial phase randomization parameter for each oscillator
 - Add phase offset for each oscillator
 - Add phase offset between channels for each oscillator
 

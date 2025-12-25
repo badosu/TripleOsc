@@ -1,0 +1,17 @@
+[package]
+name = "triple-osc"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = ["xtask"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = [
+  "assert_process_allocs",
+] }
+rand = "0.9.2"
+rand_pcg = "0.9.0"

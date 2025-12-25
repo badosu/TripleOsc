@@ -13,7 +13,23 @@ const MAX_BLOCK_SIZE: usize = 64;
 // Polyphonic modulation works by assigning integer IDs to parameters. Pattern matching on these in
 // `PolyModulation` and `MonoAutomation` events makes it possible to easily link these events to the
 // correct parameter.
-const GAIN_POLY_MOD_ID: u32 = 0;
+
+#[repr(u32)]
+enum PolyModId {
+    Gain = 0,
+
+    Osc1Gain = 1,
+    Osc2Gain = 2,
+    Osc3Gain = 3,
+
+    Osc1Detune = 4,
+    Osc2Detune = 5,
+    Osc3Detune = 6,
+}
+
+fn detune_multiplier(cents: f32) -> f32 {
+    2.0_f32.powf(cents / 1200.0)
+}
 
 /// A simple polyphonic synthesizer with support for CLAP's polyphonic modulation. See
 /// `NoteEvent::PolyModulation` for another source of information on how to use this.
@@ -28,6 +44,50 @@ struct TripleOsc {
     /// The next internal voice ID, used only to figure out the oldest voice for voice stealing.
     /// This is incremented by one each time a voice is created.
     next_internal_voice_id: u64,
+}
+
+#[derive(Params)]
+struct TripleOscParams {
+    /// A voice's gain. This can be polyphonically modulated.
+    #[id = "gain"]
+    gain: FloatParam,
+
+    /// The amplitude envelope attack time. This is the same for every voice.
+    #[id = "amp_atk"]
+    amp_attack_ms: FloatParam,
+    /// The amplitude envelope release time. This is the same for every voice.
+    #[id = "amp_rel"]
+    amp_release_ms: FloatParam,
+
+    /// The wave type for oscillator 1.
+    #[id = "osc1_wave"]
+    osc1_wave: EnumParam<WaveType>,
+    /// The wave type for oscillator 2.
+    #[id = "osc2_wave"]
+    osc2_wave: EnumParam<WaveType>,
+    /// The wave type for oscillator 3.
+    #[id = "osc3_wave"]
+    osc3_wave: EnumParam<WaveType>,
+
+    /// The gain for oscillator 1. This can be polyphonically modulated.
+    #[id = "osc1_gain"]
+    osc1_gain: FloatParam,
+    /// The gain for oscillator 2. This can be polyphonically modulated.
+    #[id = "osc2_gain"]
+    osc2_gain: FloatParam,
+    /// The gain for oscillator 3. This can be polyphonically modulated.
+    #[id = "osc3_gain"]
+    osc3_gain: FloatParam,
+
+    /// The detune for oscillator 1.
+    #[id = "osc1_detune"]
+    osc1_detune: FloatParam,
+    /// The detune for oscillator 2.
+    #[id = "osc2_detune"]
+    osc2_detune: FloatParam,
+    /// The detune for oscillator 3.
+    #[id = "osc3_detune"]
+    osc3_detune: FloatParam,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
@@ -45,33 +105,6 @@ enum WaveType {
     #[id = "pulse"]
     #[name = "Pulse"]
     Pulse,
-}
-
-impl WaveType {
-    fn sample(self, phase: f32) -> f32 {
-        match self {
-            WaveType::Saw => phase * 2.0 - 1.0,
-            WaveType::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
-            WaveType::Sin => (phase * f32::consts::TAU).sin(),
-            WaveType::Pulse => 2.0 * (phase >= 0.5) as i32 as f32 - 1.0,
-        }
-    }
-}
-
-#[derive(Params)]
-struct TripleOscParams {
-    /// A voice's gain. This can be polyphonically modulated.
-    #[id = "gain"]
-    gain: FloatParam,
-    /// A wave
-    #[id = "wave"]
-    wave: EnumParam<WaveType>,
-    /// The amplitude envelope attack time. This is the same for every voice.
-    #[id = "amp_atk"]
-    amp_attack_ms: FloatParam,
-    /// The amplitude envelope release time. This is the same for every voice.
-    #[id = "amp_rel"]
-    amp_release_ms: FloatParam,
 }
 
 /// Data for a single synth voice. In a real synth where performance matter, you may want to use a
@@ -94,11 +127,11 @@ struct Voice {
     velocity_sqrt: f32,
 
     /// The voice's current phase. This is randomized at the start of the voice
-    phase: f32,
+    phase: [f32; 3],
     /// The phase increment. This is based on the voice's frequency, derived from the note index.
     /// Since we don't support pitch expressions or pitch bend, this value stays constant for the
     /// duration of the voice.
-    phase_delta: f32,
+    phase_delta: [f32; 3],
     /// Whether the key has been released and the voice is in its release stage. The voice will be
     /// terminated when the amplitude envelope hits 0 while the note is releasing.
     releasing: bool,
@@ -108,6 +141,17 @@ struct Voice {
     /// If this voice has polyphonic gain modulation applied, then this contains the normalized
     /// offset and a smoother.
     voice_gain: Option<(f32, Smoother<f32>)>,
+}
+
+impl WaveType {
+    fn sample(self, phase: f32) -> f32 {
+        match self {
+            WaveType::Saw => phase * 2.0 - 1.0,
+            WaveType::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
+            WaveType::Sin => (phase * f32::consts::TAU).sin(),
+            WaveType::Pulse => 2.0 * (phase >= 0.5) as i32 as f32 - 1.0,
+        }
+    }
 }
 
 impl Default for TripleOsc {
@@ -123,52 +167,81 @@ impl Default for TripleOsc {
     }
 }
 
+fn new_gain_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+    FloatParam::new(
+        name,
+        util::db_to_gain(-12.0),
+        // Because we're representing gain as decibels the range is already logarithmic
+        FloatRange::Linear {
+            min: util::db_to_gain(-36.0),
+            max: util::db_to_gain(0.0),
+        },
+    )
+    // This enables polyphonic mdoulation for this parameter by representing all related
+    // events with this ID. After enabling this, the plugin **must** start sending
+    // `VoiceTerminated` events to the host whenever a voice has ended.
+    .with_poly_modulation_id(poly_mod_id as u32)
+    .with_smoother(SmoothingStyle::Logarithmic(5.0))
+    .with_unit(" dB")
+    .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
+    .with_string_to_value(formatters::s2v_f32_gain_to_db())
+}
+
+fn new_detune_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+    FloatParam::new(
+        name,
+        0.0,
+        // Because we're representing gain as decibels the range is already logarithmic
+        FloatRange::Linear {
+            min: -50.0,
+            max: 50.0,
+        },
+    )
+    // This enables polyphonic modulation for this parameter by representing all related
+    // events with this ID. After enabling this, the plugin **must** start sending
+    // `VoiceTerminated` events to the host whenever a voice has ended.
+    .with_poly_modulation_id(poly_mod_id as u32)
+    .with_smoother(SmoothingStyle::Logarithmic(5.0))
+    .with_step_size(1.0)
+    .with_unit(" cents")
+}
+
+fn new_envelope_param(name: &str, default: f32) -> FloatParam {
+    FloatParam::new(
+        name,
+        default,
+        FloatRange::Skewed {
+            min: 0.0,
+            max: 2000.0,
+            factor: FloatRange::skew_factor(-1.0),
+        },
+    )
+    // These parameters are global (and they cannot be changed once the voice has started).
+    // They also don't need any smoothing themselves because they affect smoothing
+    // coefficients.
+    .with_step_size(0.1)
+    .with_unit(" ms")
+}
+
 impl Default for TripleOscParams {
     fn default() -> Self {
         Self {
-            wave: EnumParam::new("Type", WaveType::Saw),
-            gain: FloatParam::new(
-                "Gain",
-                util::db_to_gain(-12.0),
-                // Because we're representing gain as decibels the range is already logarithmic
-                FloatRange::Linear {
-                    min: util::db_to_gain(-36.0),
-                    max: util::db_to_gain(0.0),
-                },
-            )
-            // This enables polyphonic mdoulation for this parameter by representing all related
-            // events with this ID. After enabling this, the plugin **must** start sending
-            // `VoiceTerminated` events to the host whenever a voice has ended.
-            .with_poly_modulation_id(GAIN_POLY_MOD_ID)
-            .with_smoother(SmoothingStyle::Logarithmic(5.0))
-            .with_unit(" dB")
-            .with_value_to_string(formatters::v2s_f32_gain_to_db(2))
-            .with_string_to_value(formatters::s2v_f32_gain_to_db()),
-            amp_attack_ms: FloatParam::new(
-                "Attack",
-                200.0,
-                FloatRange::Skewed {
-                    min: 0.0,
-                    max: 2000.0,
-                    factor: FloatRange::skew_factor(-1.0),
-                },
-            )
-            // These parameters are global (and they cannot be changed once the voice has started).
-            // They also don't need any smoothing themselves because they affect smoothing
-            // coefficients.
-            .with_step_size(0.1)
-            .with_unit(" ms"),
-            amp_release_ms: FloatParam::new(
-                "Release",
-                100.0,
-                FloatRange::Skewed {
-                    min: 0.0,
-                    max: 2000.0,
-                    factor: FloatRange::skew_factor(-1.0),
-                },
-            )
-            .with_step_size(0.1)
-            .with_unit(" ms"),
+            gain: new_gain_param("Gain", PolyModId::Gain),
+
+            amp_attack_ms: new_envelope_param("Attack", 200.0),
+            amp_release_ms: new_envelope_param("Release", 100.0),
+
+            osc1_wave: EnumParam::new("Osc1 Type", WaveType::Saw),
+            osc2_wave: EnumParam::new("Osc2 Type", WaveType::Saw),
+            osc3_wave: EnumParam::new("Osc3 Type", WaveType::Saw),
+
+            osc1_gain: new_gain_param("Osc1 Gain", PolyModId::Osc1Gain),
+            osc2_gain: new_gain_param("Osc2 Gain", PolyModId::Osc2Gain),
+            osc3_gain: new_gain_param("Osc3 Gain", PolyModId::Osc3Gain),
+
+            osc1_detune: new_detune_param("Osc1 Detune", PolyModId::Osc1Detune),
+            osc2_detune: new_detune_param("Osc2 Detune", PolyModId::Osc2Detune),
+            osc3_detune: new_detune_param("Osc3 Detune", PolyModId::Osc3Detune),
         }
     }
 }
@@ -249,7 +322,7 @@ impl Plugin for TripleOsc {
                                 note,
                                 velocity,
                             } => {
-                                let initial_phase: f32 = 0.0;
+                                let initial_phase = [0_f32; 3];
                                 // This starts with the attack portion of the amplitude envelope
                                 let amp_envelope = Smoother::new(SmoothingStyle::Exponential(
                                     self.params.amp_attack_ms.value(),
@@ -257,11 +330,21 @@ impl Plugin for TripleOsc {
                                 amp_envelope.reset(0.0);
                                 amp_envelope.set_target(sample_rate, 1.0);
 
+                                let base_freq = util::midi_note_to_freq(note) / sample_rate;
+                                // TODO: Allow this to be modulated instead of being set only on
+                                // note_on
+                                let phase_delta = [
+                                    base_freq * detune_multiplier(self.params.osc1_detune.value()),
+                                    base_freq * detune_multiplier(self.params.osc2_detune.value()),
+                                    base_freq * detune_multiplier(self.params.osc3_detune.value()),
+                                ];
+
                                 let voice =
                                     self.start_voice(context, timing, voice_id, channel, note);
+
+                                voice.phase_delta = phase_delta;
                                 voice.velocity_sqrt = velocity.sqrt();
                                 voice.phase = initial_phase;
-                                voice.phase_delta = util::midi_note_to_freq(note) / sample_rate;
                                 voice.amp_envelope = amp_envelope;
                             }
                             NoteEvent::NoteOff {
@@ -298,7 +381,8 @@ impl Plugin for TripleOsc {
                                     let voice = self.voices[voice_idx].as_mut().unwrap();
 
                                     match poly_modulation_id {
-                                        GAIN_POLY_MOD_ID => {
+                                        // FIXME: Use PolyModId::Gain
+                                        0 => {
                                             // This should either create a smoother for this
                                             // modulated parameter or update the existing one.
                                             // Notice how this uses the parameter's unmodulated
@@ -348,7 +432,8 @@ impl Plugin for TripleOsc {
                                 // need to be updated for all polyphonically modulated voices.
                                 for voice in self.voices.iter_mut().filter_map(|v| v.as_mut()) {
                                     match poly_modulation_id {
-                                        GAIN_POLY_MOD_ID => {
+                                        // FIXME: Use PolyModId::Gain
+                                        0 => {
                                             let (normalized_offset, smoother) =
                                                 match voice.voice_gain.as_mut() {
                                                     Some((o, s)) => (o, s),
@@ -398,13 +483,35 @@ impl Plugin for TripleOsc {
             // voice's struct, but that may not be realistic when the plugin has hundreds of
             // parameters. The `voice_*` arrays are scratch arrays that an individual voice can use.
             let block_len = block_end - block_start;
-            let mut gain = [0.0; MAX_BLOCK_SIZE];
             let mut voice_gain = [0.0; MAX_BLOCK_SIZE];
             let mut voice_amp_envelope = [0.0; MAX_BLOCK_SIZE];
-            self.params.gain.smoothed.next_block(&mut gain, block_len);
 
-            // TODO: Some form of band limiting
-            // TODO: Filter
+            let mut gain = [0.0; MAX_BLOCK_SIZE];
+            let mut osc1_gain = [0.0; MAX_BLOCK_SIZE];
+            let mut osc2_gain = [0.0; MAX_BLOCK_SIZE];
+            let mut osc3_gain = [0.0; MAX_BLOCK_SIZE];
+
+            self.params.gain.smoothed.next_block(&mut gain, block_len);
+            self.params
+                .osc1_gain
+                .smoothed
+                .next_block(&mut osc1_gain, block_len);
+            self.params
+                .osc2_gain
+                .smoothed
+                .next_block(&mut osc2_gain, block_len);
+            self.params
+                .osc3_gain
+                .smoothed
+                .next_block(&mut osc3_gain, block_len);
+
+            let osc_waves = [
+                self.params.osc1_wave.value(),
+                self.params.osc2_wave.value(),
+                self.params.osc3_wave.value(),
+            ];
+            let osc_gains = [osc1_gain, osc2_gain, osc3_gain];
+
             for voice in self.voices.iter_mut().filter_map(|v| v.as_mut()) {
                 // Depending on whether the voice has polyphonic modulation applied to it,
                 // either the global parameter values are used, or the voice's smoother is used
@@ -425,17 +532,24 @@ impl Plugin for TripleOsc {
                     .next_block(&mut voice_amp_envelope, block_len);
 
                 for (value_idx, sample_idx) in (block_start..block_end).enumerate() {
-                    let amp = voice.velocity_sqrt * gain[value_idx] * voice_amp_envelope[value_idx];
-                    let wave_type = self.params.wave.value();
-                    let sample = wave_type.sample(voice.phase) * amp;
+                    let mut sample = 0.0;
 
-                    voice.phase += voice.phase_delta;
-                    if voice.phase >= 1.0 {
-                        voice.phase -= 1.0;
+                    for osc_index in 0..3 {
+                        let osc_phase = voice.phase[osc_index];
+                        let osc_gain = osc_gains[osc_index][value_idx];
+
+                        sample += osc_waves[osc_index].sample(osc_phase) * osc_gain;
+
+                        voice.phase[osc_index] += voice.phase_delta[osc_index];
+                        if voice.phase[osc_index] >= 1.0 {
+                            voice.phase[osc_index] -= 1.0;
+                        }
                     }
 
-                    output[0][sample_idx] += sample;
-                    output[1][sample_idx] += sample;
+                    let amp = voice.velocity_sqrt * gain[value_idx] * voice_amp_envelope[value_idx];
+
+                    output[0][sample_idx] += sample * amp;
+                    output[1][sample_idx] += sample * amp;
                 }
             }
 
@@ -493,8 +607,8 @@ impl TripleOsc {
             note,
             velocity_sqrt: 1.0,
 
-            phase: 0.0,
-            phase_delta: 0.0,
+            phase: [0_f32; 3],
+            phase_delta: [0_f32; 3],
             releasing: false,
             amp_envelope: Smoother::none(),
 
@@ -507,7 +621,7 @@ impl TripleOsc {
         match self.voices.iter().position(|voice| voice.is_none()) {
             Some(free_voice_idx) => {
                 self.voices[free_voice_idx] = Some(new_voice);
-                return self.voices[free_voice_idx].as_mut().unwrap();
+                self.voices[free_voice_idx].as_mut().unwrap()
             }
             None => {
                 // If there is no free voice, find and steal the oldest one
@@ -533,7 +647,7 @@ impl TripleOsc {
                 }
 
                 *oldest_voice = Some(new_voice);
-                return oldest_voice.as_mut().unwrap();
+                oldest_voice.as_mut().unwrap()
             }
         }
     }

@@ -511,11 +511,10 @@ impl Plugin for TripleOsc {
           for osc_index in 0..3 {
             let phase = voice.phase[osc_index];
             let osc_gain = osc_gains[osc_index][value_idx];
-
             let phase_delta = voice.phase_delta[osc_index];
+            let wave = osc_waves[osc_index];
 
-            sample +=
-              osc_waves[osc_index].sample(phase, phase_delta) * osc_gain;
+            sample += wave.polyblep_sample(phase, phase_delta) * osc_gain;
 
             voice.phase[osc_index] += phase_delta;
             if voice.phase[osc_index] >= 1.0 {

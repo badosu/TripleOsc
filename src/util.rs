@@ -1,18 +1,15 @@
 use nih_plug::{
-  formatters,
-  params::FloatParam,
-  prelude::FloatRange,
-  prelude::SmoothingStyle,
+  formatters, params::FloatParam, prelude::FloatRange, prelude::SmoothingStyle,
   util,
 };
 
-use crate::PolyModId;
+use crate::ModulationId;
 
 pub fn detune_multiplier(cents: f32) -> f32 {
   2.0_f32.powf(cents / 1200.0)
 }
 
-pub fn new_gain_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+pub fn new_gain_param(name: &str, poly_mod_id: ModulationId) -> FloatParam {
   FloatParam::new(
     name,
     util::db_to_gain(-12.0),
@@ -32,7 +29,7 @@ pub fn new_gain_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
   .with_string_to_value(formatters::s2v_f32_gain_to_db())
 }
 
-pub fn new_detune_param(name: &str, poly_mod_id: PolyModId) -> FloatParam {
+pub fn new_detune_param(name: &str, poly_mod_id: ModulationId) -> FloatParam {
   FloatParam::new(
     name,
     0.0,

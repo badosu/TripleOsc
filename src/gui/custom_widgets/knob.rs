@@ -160,6 +160,7 @@ pub struct ArcKnob<'a, P: Param> {
   hover_text: bool,
   hover_text_content: String,
   label_text: String,
+  name: String,
   show_center_value: bool,
   text_size: f32,
   outline: bool,
@@ -210,9 +211,11 @@ impl<'a, P: Param> ArcKnob<'a, P> {
     param_setter: &'a ParamSetter,
     radius: f32,
     layout: KnobLayout,
+    name: String,
   ) -> Self {
     ArcKnob {
       slider_region: SliderRegion::new(param, param_setter),
+      name,
       radius,
       line_color: Color32::BLACK,
       fill_color: Color32::BLACK,
@@ -791,18 +794,14 @@ impl<'a, P: Param> Widget for ArcKnob<'a, P> {
             painter.text(
               label_pos,
               Align2::CENTER_CENTER,
-              self.slider_region.param.name().to_owned()
-                + ": "
-                + &self.slider_region.get_string(),
+              self.name.to_string() + ": " + &self.slider_region.get_string(),
               FontId::proportional(self.text_size),
               self.black02,
             );
             painter.text(
               label_pos,
               Align2::CENTER_CENTER,
-              self.slider_region.param.name().to_owned()
-                + ": "
-                + &self.slider_region.get_string(),
+              self.name.to_string() + ": " + &self.slider_region.get_string(),
               FontId::proportional(self.text_size),
               self.text04,
             );
@@ -824,14 +823,14 @@ impl<'a, P: Param> Widget for ArcKnob<'a, P> {
             painter.text(
               label_pos,
               Align2::CENTER_CENTER,
-              self.slider_region.param.name(),
+              &self.name,
               FontId::proportional(self.text_size),
               self.black02,
             );
             painter.text(
               label_pos,
               Align2::CENTER_CENTER,
-              self.slider_region.param.name(),
+              &self.name,
               FontId::proportional(self.text_size),
               self.text04,
             );
@@ -840,18 +839,14 @@ impl<'a, P: Param> Widget for ArcKnob<'a, P> {
           painter.text(
             label_pos,
             Align2::CENTER_CENTER,
-            self.label_text.to_string()
-              + ": "
-              + self.slider_region.param.name(),
+            self.label_text.to_string() + ": " + &self.name,
             FontId::proportional(self.text_size),
             self.black02,
           );
           painter.text(
             label_pos,
             Align2::CENTER_CENTER,
-            self.label_text.to_string()
-              + ": "
-              + self.slider_region.param.name(),
+            self.label_text.to_string() + ": " + &self.name,
             FontId::proportional(self.text_size),
             self.text04,
           );
@@ -873,14 +868,14 @@ impl<'a, P: Param> Widget for ArcKnob<'a, P> {
           painter.text(
             label_pos,
             Align2::CENTER_CENTER,
-            self.slider_region.param.name(),
+            &self.name,
             FontId::proportional(self.text_size),
             self.black02,
           );
           painter.text(
             label_pos,
             Align2::CENTER_CENTER,
-            self.slider_region.param.name(),
+            &self.name,
             FontId::proportional(self.text_size),
             self.text04,
           );

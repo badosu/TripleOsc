@@ -5,10 +5,13 @@ use num_enum::{FromPrimitive, IntoPrimitive};
 use rand_pcg::Pcg32;
 use std::sync::Arc;
 
+use crate::wave::Wave;
+
 // use rand::Rng;
 
 mod gui;
 mod util;
+mod wave;
 
 /// The number of simultaneous voices for this synth.
 const NUM_VOICES: u32 = 16;
@@ -21,7 +24,7 @@ const MAX_BLOCK_SIZE: usize = 64;
 // correct parameter.
 #[derive(Debug, PartialEq, IntoPrimitive, FromPrimitive)]
 #[repr(u32)]
-enum PolyModId {
+enum ModulationId {
   Gain = 0,
 
   Osc1Gain = 1,
@@ -73,13 +76,13 @@ struct TripleOscParams {
 
   /// The wave type for oscillator 1.
   #[id = "osc1_wave"]
-  osc1_wave: EnumParam<WaveType>,
+  osc1_wave: EnumParam<Wave>,
   /// The wave type for oscillator 2.
   #[id = "osc2_wave"]
-  osc2_wave: EnumParam<WaveType>,
+  osc2_wave: EnumParam<Wave>,
   /// The wave type for oscillator 3.
   #[id = "osc3_wave"]
-  osc3_wave: EnumParam<WaveType>,
+  osc3_wave: EnumParam<Wave>,
 
   /// The gain for oscillator 1. This can be polyphonically modulated.
   #[id = "osc1_gain"]
@@ -100,23 +103,6 @@ struct TripleOscParams {
   /// The detune for oscillator 3.
   #[id = "osc3_detune"]
   osc3_detune: FloatParam,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
-#[non_exhaustive]
-enum WaveType {
-  #[id = "saw"]
-  #[name = "Sawtooth"]
-  Saw,
-  #[id = "triangle"]
-  #[name = "Triangle"]
-  Triangle,
-  #[id = "sin"]
-  #[name = "Sin"]
-  Sin,
-  #[id = "pulse"]
-  #[name = "Pulse"]
-  Pulse,
 }
 
 /// Data for a single synth voice. In a real synth where performance matter, you may want to use a
@@ -155,28 +141,17 @@ struct Voice {
   voice_gain: Option<(f32, Smoother<f32>)>,
 }
 
-impl fmt::Display for PolyModId {
+impl fmt::Display for ModulationId {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match self {
-      PolyModId::Gain => write!(f, "Gain"),
-      PolyModId::Osc1Gain => write!(f, "Osc1Gain"),
-      PolyModId::Osc2Gain => write!(f, "Osc2Gain"),
-      PolyModId::Osc3Gain => write!(f, "Osc3Gain"),
-      PolyModId::Osc1Detune => write!(f, "Osc1Detune"),
-      PolyModId::Osc2Detune => write!(f, "Osc2Detune"),
-      PolyModId::Osc3Detune => write!(f, "Osc3Detune"),
-      PolyModId::Unknown(n) => write!(f, "Unknown({})", n),
-    }
-  }
-}
-
-impl WaveType {
-  fn sample(self, phase: f32) -> f32 {
-    match self {
-      WaveType::Saw => phase * 2.0 - 1.0,
-      WaveType::Triangle => 1.0 - 4.0 * (phase - 0.5).abs(),
-      WaveType::Sin => (phase * f32::consts::TAU).sin(),
-      WaveType::Pulse => 2.0 * (phase >= 0.5) as i32 as f32 - 1.0,
+      ModulationId::Gain => write!(f, "Gain"),
+      ModulationId::Osc1Gain => write!(f, "Osc1Gain"),
+      ModulationId::Osc2Gain => write!(f, "Osc2Gain"),
+      ModulationId::Osc3Gain => write!(f, "Osc3Gain"),
+      ModulationId::Osc1Detune => write!(f, "Osc1Detune"),
+      ModulationId::Osc2Detune => write!(f, "Osc2Detune"),
+      ModulationId::Osc3Detune => write!(f, "Osc3Detune"),
+      ModulationId::Unknown(n) => write!(f, "Unknown({})", n),
     }
   }
 }
@@ -199,22 +174,31 @@ impl Default for TripleOscParams {
     Self {
       editor_state: gui::editor_state(),
 
-      gain: util::new_gain_param("Gain", PolyModId::Gain),
+      gain: util::new_gain_param("Gain", ModulationId::Gain),
 
       amp_attack_ms: util::new_envelope_param("Attack", 200.0),
       amp_release_ms: util::new_envelope_param("Release", 100.0),
 
-      osc1_wave: EnumParam::new("Osc1 Type", WaveType::Saw),
-      osc2_wave: EnumParam::new("Osc2 Type", WaveType::Saw),
-      osc3_wave: EnumParam::new("Osc3 Type", WaveType::Saw),
+      osc1_wave: EnumParam::new("Osc1 Type", Wave::Saw),
+      osc2_wave: EnumParam::new("Osc2 Type", Wave::Saw),
+      osc3_wave: EnumParam::new("Osc3 Type", Wave::Saw),
 
-      osc1_gain: util::new_gain_param("Osc1 Gain", PolyModId::Osc1Gain),
-      osc2_gain: util::new_gain_param("Osc2 Gain", PolyModId::Osc2Gain),
-      osc3_gain: util::new_gain_param("Osc3 Gain", PolyModId::Osc3Gain),
+      osc1_gain: util::new_gain_param("Osc1 Gain", ModulationId::Osc1Gain),
+      osc2_gain: util::new_gain_param("Osc2 Gain", ModulationId::Osc2Gain),
+      osc3_gain: util::new_gain_param("Osc3 Gain", ModulationId::Osc3Gain),
 
-      osc1_detune: util::new_detune_param("Osc1 Detune", PolyModId::Osc1Detune),
-      osc2_detune: util::new_detune_param("Osc2 Detune", PolyModId::Osc2Detune),
-      osc3_detune: util::new_detune_param("Osc3 Detune", PolyModId::Osc3Detune),
+      osc1_detune: util::new_detune_param(
+        "Osc1 Detune",
+        ModulationId::Osc1Detune,
+      ),
+      osc2_detune: util::new_detune_param(
+        "Osc2 Detune",
+        ModulationId::Osc2Detune,
+      ),
+      osc3_detune: util::new_detune_param(
+        "Osc3 Detune",
+        ModulationId::Osc3Detune,
+      ),
     }
   }
 }
@@ -375,8 +359,8 @@ impl Plugin for TripleOsc {
                 if let Some(voice_idx) = self.get_voice_idx(voice_id) {
                   let voice = self.voices[voice_idx].as_mut().unwrap();
 
-                  match PolyModId::from(poly_modulation_id) {
-                    PolyModId::Gain => {
+                  match ModulationId::from(poly_modulation_id) {
+                    ModulationId::Gain => {
                       // This should either create a smoother for this
                       // modulated parameter or update the existing one.
                       // Notice how this uses the parameter's unmodulated
@@ -418,9 +402,9 @@ impl Plugin for TripleOsc {
                 // a modulated parameter, the modulated values/smoothing targets
                 // need to be updated for all polyphonically modulated voices.
                 for voice in self.voices.iter_mut().filter_map(|v| v.as_mut()) {
-                  match PolyModId::from(poly_modulation_id) {
+                  match ModulationId::from(poly_modulation_id) {
                     // FIXME: Use PolyModId::Gain
-                    PolyModId::Gain => {
+                    ModulationId::Gain => {
                       let (normalized_offset, smoother) =
                         match voice.voice_gain.as_mut() {
                           Some((o, s)) => (o, s),

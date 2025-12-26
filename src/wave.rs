@@ -25,16 +25,7 @@ impl Wave {
   }
 
   fn triangle(phase: f32) -> f32 {
-    if phase < 0.25 {
-      // 0 -> 1
-      phase * 4.0
-    } else if phase < 0.75 {
-      // 1 -> -1
-      2.0 - phase * 4.0
-    } else {
-      // -1 -> 0
-      phase * 4.0 - 4.0
-    }
+    (((phase + 0.75).floor() - phase) * 4.0 - 1.0).abs() - 1.0
   }
 
   fn pulse(phase: f32) -> f32 {
@@ -51,10 +42,7 @@ impl Wave {
         Self::pulse(phase) + polyblep(phase, phase_delta)
           - polyblep((phase + 0.5) % 1.0, phase_delta)
       }
-      Wave::Triangle => {
-        // FIXME: Introduce polyblep
-        Self::triangle(phase)
-      }
+      Wave::Triangle => Self::triangle(phase) + blamp(phase, phase_delta),
     }
   }
 }
@@ -80,4 +68,38 @@ fn polyblep(phase: f32, phase_delta: f32) -> f32 {
   else {
     0.0
   }
+}
+
+const FOUR_THIRDS: f32 = 4.0 / 3.0;
+
+/// PolyBLEP for a triangular waveform of the form:
+/// (((phase + 0.75).floor() - phase) * 4.0 - 1.0).abs() - 1.0
+///
+/// By Martin Finke (transpiled to rust)
+pub fn blamp(phase: f32, phase_delta: f32) -> f32 {
+  // AFTER BOTTOM
+  if phase >= 0.75 && phase <= 0.75 + phase_delta {
+    let p = (phase - 0.75) / phase_delta - 1.0;
+    return -(p * p * p * FOUR_THIRDS * phase_delta);
+  }
+
+  // BEFORE BOTTOM
+  if phase >= 0.75 - phase_delta && phase <= 0.75 {
+    let p = (phase - 0.75) / phase_delta + 1.0;
+    return p * p * p * FOUR_THIRDS * phase_delta;
+  }
+
+  // AFTER PEAK
+  if phase >= 0.25 && phase <= 0.25 + phase_delta {
+    let p = (phase - 0.25) / phase_delta - 1.0;
+    return p * p * p * FOUR_THIRDS * phase_delta;
+  }
+
+  // BEFORE PEAK
+  if phase >= 0.25 - phase_delta && phase <= 0.25 {
+    let p = (phase - 0.25) / phase_delta + 1.0;
+    return -(p * p * p * FOUR_THIRDS * phase_delta);
+  }
+
+  0.0
 }

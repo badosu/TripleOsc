@@ -1,8 +1,7 @@
-use nih_plug::util;
-
+// use nih_plug::prelude::*;
+//
+// use triple_osc::TripleOsc;
+//
 fn main() {
-    let min = util::db_to_gain(-36.0);
-    let max = util::db_to_gain(0.0);
-
-    println!("{} | {}", min, max);
+  //nih_export_standalone::<TripleOsc>();
 }

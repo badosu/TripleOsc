@@ -14,6 +14,7 @@ A simple triple oscillator CLAP synthesizer.
 
 ## TODO
 
+- Steal widgets and ideas from https://github.com/ardura/Actuate
 - Make modulation work for all parameters similar to current master gain (currently only new notes get updated parameters).
 - Add Coarse detuning
 - Add Decay and Release

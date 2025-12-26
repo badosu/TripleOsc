@@ -1,12 +1,39 @@
-use nih_plug::{editor::Editor, params::Param, prelude::AsyncExecutor};
+mod custom_widgets;
+
+use crate::{
+  TripleOsc,
+  gui::custom_widgets::ui_knob::{ArcKnob, KnobLayout},
+};
+use custom_widgets::ui_knob;
+use nih_plug::{
+  editor::Editor,
+  params::FloatParam,
+  prelude::{AsyncExecutor, ParamSetter},
+};
 use nih_plug_egui::{
-  create_egui_editor, egui::Vec2, resizable_window::ResizableWindow, widgets,
+  EguiState, create_egui_editor,
+  egui::{self, Color32},
 };
 
-use crate::TripleOsc;
+pub const DARK_GREY_UI_COLOR: Color32 = Color32::from_rgb(42, 42, 42);
+pub const YELLOW_MUSTARD: Color32 = Color32::from_rgb(172, 131, 25);
+// pub const MEDIUM_GREY_UI_COLOR: Color32 = Color32::from_rgb(52, 52, 52);
+// pub const LIGHTER_GREY_UI_COLOR: Color32 = Color32::from_rgb(69, 69, 69);
+// pub const A_BACKGROUND_COLOR_TOP: Color32 = Color32::from_rgb(38, 38, 38);
+// pub const TEAL_GREEN: Color32 = Color32::from_rgb(61, 178, 166);
+// pub const DARKEST_BOTTOM_UI_COLOR: Color32 = Color32::from_rgb(27, 27, 27);
+// pub const DARKER_GREY_UI_COLOR: Color32 = Color32::from_rgb(34, 34, 34);
+// pub const FONT_COLOR: Color32 = Color32::from_rgb(248, 248, 248);
 
-const MIN_SIZE_X: f32 = 800.0;
-const MIN_SIZE_Y: f32 = 600.0;
+const TEXT_SIZE: f32 = 11.0;
+const KNOB_SIZE: f32 = 28.0;
+
+const WIDTH: u32 = 920;
+const HEIGHT: u32 = 656;
+
+pub(crate) fn editor_state() -> std::sync::Arc<EguiState> {
+  EguiState::from_size(WIDTH, HEIGHT)
+}
 
 pub(crate) fn make_gui(
   instance: &TripleOsc,
@@ -27,61 +54,88 @@ fn gui_build(_egui_ctx: &nih_plug_egui::egui::Context, _state: &mut ()) {}
 
 fn gui_update(
   params: std::sync::Arc<crate::TripleOscParams>,
-  egui_state: std::sync::Arc<nih_plug_egui::EguiState>,
-) -> impl Fn(
-  &nih_plug_egui::egui::Context,
-  &nih_plug::prelude::ParamSetter<'_>,
-  &mut (),
-) {
+  _egui_state: std::sync::Arc<nih_plug_egui::EguiState>,
+) -> impl Fn(&nih_plug_egui::egui::Context, &ParamSetter<'_>, &mut ()) {
   move |egui_ctx, setter, _state| {
-    ResizableWindow::new("res-wind")
-      .min_size(Vec2::new(MIN_SIZE_X, MIN_SIZE_Y))
-      .show(egui_ctx, egui_state.as_ref(), |ui| {
+    egui::CentralPanel::default().show(egui_ctx, |ui| {
+      ui.vertical(|ui| {
+        ui.heading("Oscillators");
+
         ui.horizontal(|ui| {
-          ui.vertical(|ui| {
-            ui.heading("Global");
+          ui.label(format!("Wave: {}", params.osc1_wave));
 
-            let global_params =
-              [&params.gain, &params.amp_attack_ms, &params.amp_release_ms];
-            for param in global_params {
-              ui.label(param.name());
-              ui.add(widgets::ParamSlider::for_param(param, setter));
-            }
-          });
+          ui.add(
+            add_knob(&params.osc1_gain, setter)
+              .set_hover_text("Oscillator 1 Gain (in dB)".to_string()),
+          );
 
-          ui.vertical(|ui| {
-            ui.heading("Osc 1");
-            ui.label(format!("Waveform: {}", params.osc1_wave));
+          ui.add(
+            add_knob(&params.osc1_detune, setter).set_hover_text(
+              "Oscillator 1 fine detune (in cents)".to_string(),
+            ),
+          );
+        });
 
-            let osc_params = [&params.osc1_gain, &params.osc1_detune];
-            for param in osc_params {
-              ui.label(param.name());
-              ui.add(widgets::ParamSlider::for_param(param, setter));
-            }
-          });
+        ui.horizontal(|ui| {
+          ui.label(format!("Wave: {}", params.osc2_wave));
 
-          ui.vertical(|ui| {
-            ui.heading("Osc 2");
-            ui.label(format!("Waveform: {}", params.osc2_wave));
+          ui.add(
+            add_knob(&params.osc2_gain, setter)
+              .set_hover_text("Oscillator 2 Gain (in dB)".to_string()),
+          );
 
-            let osc_params = [&params.osc2_gain, &params.osc2_detune];
-            for param in osc_params {
-              ui.label(param.name());
-              ui.add(widgets::ParamSlider::for_param(param, setter));
-            }
-          });
+          ui.add(
+            add_knob(&params.osc2_detune, setter).set_hover_text(
+              "Oscillator 2 fine detune (in cents)".to_string(),
+            ),
+          );
+        });
 
-          ui.vertical(|ui| {
-            ui.heading("Osc 3");
-            ui.label(format!("Waveform: {}", params.osc3_wave));
+        ui.horizontal(|ui| {
+          ui.label(format!("Wave: {}", params.osc3_wave));
 
-            let osc_params = [&params.osc3_gain, &params.osc3_detune];
-            for param in osc_params {
-              ui.label(param.name());
-              ui.add(widgets::ParamSlider::for_param(param, setter));
-            }
-          });
+          ui.add(
+            add_knob(&params.osc3_gain, setter)
+              .set_hover_text("Oscillator 3 Gain (in dB)".to_string()),
+          );
+
+          ui.add(
+            add_knob(&params.osc3_detune, setter).set_hover_text(
+              "Oscillator 3 fine detune (in cents)".to_string(),
+            ),
+          );
         });
       });
+
+      ui.vertical(|ui| {
+        ui.heading("Global");
+
+        ui.add(
+          add_knob(&params.gain, setter)
+            .set_hover_text("Master gain level".to_string()),
+        );
+
+        ui.add(
+          add_knob(&params.amp_attack_ms, setter)
+            .set_hover_text("Attack envelope duration (in ms)".to_string()),
+        );
+
+        ui.add(
+          add_knob(&params.amp_release_ms, setter)
+            .set_hover_text("Release envelope duration (in ms)".to_string()),
+        );
+      });
+    });
   }
+}
+
+fn add_knob<'a>(
+  param: &'a FloatParam,
+  setter: &'a ParamSetter<'a>,
+) -> ArcKnob<'a, FloatParam> {
+  ArcKnob::for_param(param, setter, KNOB_SIZE, KnobLayout::HorizontalInline)
+    .preset_style(ui_knob::KnobStyle::Preset1)
+    .set_fill_color(DARK_GREY_UI_COLOR)
+    .set_line_color(YELLOW_MUSTARD)
+    .set_text_size(TEXT_SIZE)
 }

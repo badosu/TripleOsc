@@ -197,7 +197,7 @@ impl Default for TripleOsc {
 impl Default for TripleOscParams {
   fn default() -> Self {
     Self {
-      editor_state: EguiState::from_size(300, 180),
+      editor_state: gui::editor_state(),
 
       gain: util::new_gain_param("Gain", PolyModId::Gain),
 
@@ -244,7 +244,10 @@ impl Plugin for TripleOsc {
     self.params.clone()
   }
 
-  fn editor(&mut self, async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+  fn editor(
+    &mut self,
+    async_executor: AsyncExecutor<Self>,
+  ) -> Option<Box<dyn Editor>> {
     gui::make_gui(self, async_executor)
   }
 
@@ -320,12 +323,16 @@ impl Plugin for TripleOsc {
                 // TODO: Allow this to be modulated instead of being set only on
                 // note_on
                 let phase_delta = [
-                  base_freq * util::detune_multiplier(self.params.osc1_detune.value()),
-                  base_freq * util::detune_multiplier(self.params.osc2_detune.value()),
-                  base_freq * util::detune_multiplier(self.params.osc3_detune.value()),
+                  base_freq
+                    * util::detune_multiplier(self.params.osc1_detune.value()),
+                  base_freq
+                    * util::detune_multiplier(self.params.osc2_detune.value()),
+                  base_freq
+                    * util::detune_multiplier(self.params.osc3_detune.value()),
                 ];
 
-                let voice = self.start_voice(context, timing, voice_id, channel, note);
+                let voice =
+                  self.start_voice(context, timing, voice_id, channel, note);
 
                 voice.phase_delta = phase_delta;
                 voice.velocity_sqrt = velocity.sqrt();
@@ -338,7 +345,12 @@ impl Plugin for TripleOsc {
                 channel,
                 note,
                 velocity: _,
-              } => self.start_release_for_voices(sample_rate, voice_id, channel, note),
+              } => self.start_release_for_voices(
+                sample_rate,
+                voice_id,
+                channel,
+                note,
+              ),
               NoteEvent::Choke {
                 timing,
                 voice_id,
@@ -372,15 +384,18 @@ impl Plugin for TripleOsc {
                       // offset to create the target plain value
                       let target_plain_value =
                         self.params.gain.preview_modulated(normalized_offset);
-                      let (_, smoother) = voice.voice_gain.get_or_insert_with(|| {
-                        (normalized_offset, self.params.gain.smoothed.clone())
-                      });
+                      let (_, smoother) =
+                        voice.voice_gain.get_or_insert_with(|| {
+                          (normalized_offset, self.params.gain.smoothed.clone())
+                        });
 
                       // If this `PolyModulation` events happens on the
                       // same sample as a voice's `NoteOn` event, then it
                       // should immediately use the modulated value
                       // instead of slowly fading in
-                      if voice.internal_voice_id >= this_sample_internal_voice_id_start {
+                      if voice.internal_voice_id
+                        >= this_sample_internal_voice_id_start
+                      {
                         smoother.reset(target_plain_value);
                       } else {
                         smoother.set_target(sample_rate, target_plain_value);
@@ -406,15 +421,16 @@ impl Plugin for TripleOsc {
                   match PolyModId::from(poly_modulation_id) {
                     // FIXME: Use PolyModId::Gain
                     PolyModId::Gain => {
-                      let (normalized_offset, smoother) = match voice.voice_gain.as_mut() {
-                        Some((o, s)) => (o, s),
-                        // If the voice does not have existing
-                        // polyphonic modulation, then there's nothing
-                        // to do here. The global automation/monophonic
-                        // modulation has already been taken care of by
-                        // the framework.
-                        None => continue,
-                      };
+                      let (normalized_offset, smoother) =
+                        match voice.voice_gain.as_mut() {
+                          Some((o, s)) => (o, s),
+                          // If the voice does not have existing
+                          // polyphonic modulation, then there's nothing
+                          // to do here. The global automation/monophonic
+                          // modulation has already been taken care of by
+                          // the framework.
+                          None => continue,
+                        };
                       let target_plain_value = self
                         .params
                         .gain
@@ -520,10 +536,13 @@ impl Plugin for TripleOsc {
             }
           }
 
-          let amp = voice.velocity_sqrt * gain[value_idx] * voice_amp_envelope[value_idx];
+          let voice_amp = voice.velocity_sqrt * voice_amp_envelope[value_idx];
+          let amp = voice_amp * gain[value_idx];
 
-          output[0][sample_idx] += sample * amp;
-          output[1][sample_idx] += sample * amp;
+          sample *= amp;
+
+          output[0][sample_idx] += sample;
+          output[1][sample_idx] += sample;
         }
       }
 
@@ -559,10 +578,9 @@ impl TripleOsc {
   /// Get the index of a voice by its voice ID, if the voice exists. This does not immediately
   /// return a reference to the voice to avoid lifetime issues.
   fn get_voice_idx(&mut self, voice_id: i32) -> Option<usize> {
-    self
-      .voices
-      .iter()
-      .position(|voice| matches!(voice, Some(voice) if voice.voice_id == voice_id))
+    self.voices.iter().position(
+      |voice| matches!(voice, Some(voice) if voice.voice_id == voice_id),
+    )
   }
 
   /// Start a new voice with the given voice ID. If all voices are currently in use, the oldest
@@ -576,7 +594,8 @@ impl TripleOsc {
     note: u8,
   ) -> &mut Voice {
     let new_voice = Voice {
-      voice_id: voice_id.unwrap_or_else(|| compute_fallback_voice_id(note, channel)),
+      voice_id: voice_id
+        .unwrap_or_else(|| compute_fallback_voice_id(note, channel)),
       internal_voice_id: self.next_internal_voice_id,
       channel,
       note,
@@ -606,7 +625,9 @@ impl TripleOsc {
           self
             .voices
             .iter_mut()
-            .min_by_key(|voice| voice.as_ref().unwrap_unchecked().internal_voice_id)
+            .min_by_key(|voice| {
+              voice.as_ref().unwrap_unchecked().internal_voice_id
+            })
             .unwrap_unchecked()
         };
 
@@ -650,7 +671,8 @@ impl TripleOsc {
           || (channel == *candidate_channel && note == *candidate_note) =>
         {
           *releasing = true;
-          amp_envelope.style = SmoothingStyle::Exponential(self.params.amp_release_ms.value());
+          amp_envelope.style =
+            SmoothingStyle::Exponential(self.params.amp_release_ms.value());
           amp_envelope.set_target(sample_rate, 0.0);
 
           // If this targetted a single voice ID, we're done here. Otherwise there may be
@@ -713,8 +735,9 @@ const fn compute_fallback_voice_id(note: u8, channel: u8) -> i32 {
 
 impl ClapPlugin for TripleOsc {
   const CLAP_ID: &'static str = "com.badosu.triple-osc";
-  const CLAP_DESCRIPTION: Option<&'static str> =
-    Some("A simple polyphonic synthesizer with support for polyphonic modulation");
+  const CLAP_DESCRIPTION: Option<&'static str> = Some(
+    "A simple polyphonic synthesizer with support for polyphonic modulation",
+  );
   const CLAP_MANUAL_URL: Option<&'static str> = Some(Self::URL);
   const CLAP_SUPPORT_URL: Option<&'static str> = None;
   const CLAP_FEATURES: &'static [ClapFeature] = &[
@@ -723,15 +746,16 @@ impl ClapPlugin for TripleOsc {
     ClapFeature::Stereo,
   ];
 
-  const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> = Some(PolyModulationConfig {
-    // If the plugin's voice capacity changes at runtime (for instance, when switching to a
-    // monophonic mode), then the plugin should inform the host in the `initialize()` function
-    // as well as in the `process()` function if it changes at runtime using
-    // `context.set_current_voice_capacity()`
-    max_voice_capacity: NUM_VOICES,
-    // This enables voice stacking in Bitwig.
-    supports_overlapping_voices: true,
-  });
+  const CLAP_POLY_MODULATION_CONFIG: Option<PolyModulationConfig> =
+    Some(PolyModulationConfig {
+      // If the plugin's voice capacity changes at runtime (for instance, when switching to a
+      // monophonic mode), then the plugin should inform the host in the `initialize()` function
+      // as well as in the `process()` function if it changes at runtime using
+      // `context.set_current_voice_capacity()`
+      max_voice_capacity: NUM_VOICES,
+      // This enables voice stacking in Bitwig.
+      supports_overlapping_voices: true,
+    });
 }
 
 nih_export_clap!(TripleOsc);

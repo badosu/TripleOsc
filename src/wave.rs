@@ -38,13 +38,17 @@ impl Wave {
     match self {
       Wave::Sin => (phase * TAU).sin(),
       Wave::Saw => Self::saw(phase) - polyblep(phase, phase_delta),
-      Wave::Pulse => {
-        Self::pulse(phase) + polyblep(phase, phase_delta)
-          - polyblep((phase + 0.5) % 1.0, phase_delta)
+      Wave::Pulse => Self::pulse(phase) + pulse_blamp(phase, phase_delta),
+      Wave::Triangle => {
+        Self::triangle(phase) + triangle_blamp(phase, phase_delta)
       }
-      Wave::Triangle => Self::triangle(phase) + blamp(phase, phase_delta),
     }
   }
+}
+
+#[inline]
+fn pulse_blamp(phase: f32, phase_delta: f32) -> f32 {
+  polyblep(phase, phase_delta) - polyblep((phase + 0.5) % 1.0, phase_delta)
 }
 
 /// PolyBLEP by Tale
@@ -53,6 +57,7 @@ impl Wave {
 /// See:
 /// http://www.kvraudio.com/forum/viewtopic.php?t=375517
 /// https://www.martin-finke.de/articles/audio-plugins-018-polyblep-oscillator/
+#[inline]
 fn polyblep(phase: f32, phase_delta: f32) -> f32 {
   // 0 <= phase < 1
   if phase < phase_delta {
@@ -72,11 +77,13 @@ fn polyblep(phase: f32, phase_delta: f32) -> f32 {
 
 const FOUR_THIRDS: f32 = 4.0 / 3.0;
 
+/// blamp By Martin Finke (transpiled to rust)
+///
 /// PolyBLEP for a triangular waveform of the form:
 /// (((phase + 0.75).floor() - phase) * 4.0 - 1.0).abs() - 1.0
 ///
-/// By Martin Finke (transpiled to rust)
-pub fn blamp(phase: f32, phase_delta: f32) -> f32 {
+#[inline]
+pub fn triangle_blamp(phase: f32, phase_delta: f32) -> f32 {
   // AFTER BOTTOM
   if phase >= 0.75 && phase <= 0.75 + phase_delta {
     let p = (phase - 0.75) / phase_delta - 1.0;

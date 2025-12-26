@@ -83,7 +83,7 @@ const FOUR_THIRDS: f32 = 4.0 / 3.0;
 /// (((phase + 0.75).floor() - phase) * 4.0 - 1.0).abs() - 1.0
 ///
 #[inline]
-pub fn triangle_blamp(phase: f32, phase_delta: f32) -> f32 {
+fn triangle_blamp(phase: f32, phase_delta: f32) -> f32 {
   // AFTER BOTTOM
   if phase >= 0.75 && phase <= 0.75 + phase_delta {
     let p = (phase - 0.75) / phase_delta - 1.0;
